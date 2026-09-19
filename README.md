@@ -65,6 +65,7 @@ npm run mobile:web
 ```
 
 The Android package is `store.hushwork.app`; EAS credentials and Play Store signing are intentionally left to the client’s release account.
+The checked-in [mobile/eas.json](mobile/eas.json) includes development APK, internal preview APK, and production profiles. This workspace does not have Android SDK/ADB or an authenticated EAS account, so no misleading local APK is claimed; the live Expo web surface and Metro URL are running now.
 
 ## Verification
 
