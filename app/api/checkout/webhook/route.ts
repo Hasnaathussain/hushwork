@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createOrder } from "@/lib/db";
+import { createOrder, OrderError } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -27,11 +27,13 @@ export async function POST(request: Request) {
         city: metadata.city ?? "",
         postalCode: metadata.postalCode ?? "",
         country: metadata.country ?? "",
-        items
+        items,
+        paymentEvent: { id: event.id, provider: "stripe", type: event.type, reference: session.id }
       });
     }
     return NextResponse.json({ received: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof OrderError && error.code === "PAYMENT_EVENT_ALREADY_PROCESSED") return NextResponse.json({ received: true, duplicate: true });
     return NextResponse.json({ error: "Invalid payment webhook." }, { status: 400 });
   }
 }

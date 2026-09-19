@@ -42,9 +42,12 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-4.1-mini
+RESEND_API_KEY=...
+RESEND_FROM_EMAIL=HUSHWORK <hello@your-domain.example>
 ```
 
 Checkout fails closed with a clear setup message until Stripe keys and the webhook are configured. It never creates a fake order.
+Password recovery uses the same fail-safe pattern: set the Resend variables when the client wants real reset email delivery; without them, the API still returns a non-enumerating response and sends nothing.
 
 ## Android companion
 
@@ -88,9 +91,21 @@ GET  /api/v1/orders                 # Bearer token
 POST /api/checkout/session          # Stripe hosted Checkout
 POST /api/checkout/webhook           # Stripe signature required
 POST /api/assistant
+PATCH /api/admin/products/:slug     # Admin session required
+PATCH /api/admin/orders/:id         # Admin session required
 ```
 
 The server re-reads prices and inventory from Postgres before creating a payment session. The webhook verifies Stripe’s signature, uses an idempotency key, locks stock rows in a transaction, and creates an order once.
+
+## Operations
+
+The protected `/admin` surface manages product stock/visibility and order status. Promote a staff account directly in the hosted database after creating it through the normal signup flow:
+
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'staff@your-domain.example';
+```
+
+Every admin mutation writes an `admin_audit_events` record. No admin credential or service key is exposed to the browser.
 
 ## Deployment checklist
 
@@ -99,3 +114,4 @@ The server re-reads prices and inventory from Postgres before creating a payment
 3. Point Stripe’s `checkout.session.completed` webhook to `/api/checkout/webhook`.
 4. Confirm `/api/health`, signup/login, product images, hosted checkout, and order history on the production URL.
 5. Start Expo with the production API URL and create the signed Android build through the client’s EAS/Play accounts.
+6. If password recovery is required, add `RESEND_API_KEY` and `RESEND_FROM_EMAIL`, then verify the reset flow on the production domain.

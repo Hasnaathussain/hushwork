@@ -27,3 +27,21 @@ export const orderSchema = z.object({
 export const assistantSchema = z.object({
   message: z.string().trim().min(2).max(600)
 });
+
+export const adminProductSchema = z.object({
+  stock: z.number().int().min(0).max(1_000_000),
+  active: z.boolean()
+});
+
+export const adminOrderStatusSchema = z.object({
+  status: z.enum(["pending_payment", "paid", "processing", "shipped", "delivered", "cancelled", "refunded"])
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email().max(160).transform((value) => value.toLowerCase())
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(32).max(128),
+  password: z.string().min(8).max(128)
+});

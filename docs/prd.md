@@ -1,7 +1,7 @@
 # HUSHWORK Reset Systems — Product Requirements Document
 
 **Status:** Build contract
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2026-09-19
 
 ## 1. Product definition
@@ -14,7 +14,7 @@ The product is not a gallery, mood board, or interactive art experiment. Every s
 
 **Primary customers:** design-conscious professionals, freelancers, remote workers, and gift buyers aged 25–45 who want their routines and spaces to feel considered without buying status objects.
 
-**Business model:** product sales, curated kits, gift purchases, and repeat purchases of consumables/refills.
+**Business model:** product sales, gift purchases, and repeat purchases of consumables/refills. Curated kits are intentionally deferred until the catalog has enough repeatable components.
 
 ## 2. Goals and non-goals
 
@@ -45,7 +45,7 @@ The product is not a gallery, mood board, or interactive art experiment. Every s
 | `/` | Product-first storefront home with featured products, kits, trust signals, and a clear path to shop. |
 | `/shop` | Searchable catalog with collection, price, stock, and sort controls. |
 | `/collections/[slug]` | Merchandised views for Focus, Reset, Travel, Gifts, and Refills. |
-| `/product/[slug]` | Product gallery, details, materials, stock, quantity, reviews, related items, and add-to-cart. |
+| `/product/[slug]` | Product gallery, details, materials, stock, quantity, assurance, and add-to-cart. |
 | `/cart` | Editable cart, shipping estimate, discount entry, and checkout handoff. |
 | `/checkout` | Address, shipping option, order review, and hosted payment handoff. |
 | `/checkout/success` | Confirmed order state and next steps. |
@@ -135,7 +135,7 @@ No texture overlay, fake paper grain, decorative orbits, unexplained dials, or C
 
 ### Imagery
 
-Each product has at least four usable images: clean packshot, alternate angle/detail, in-context lifestyle, and scale/use image where appropriate. The catalog uses one photography language: neutral studio base, directional light, tactile materials, honest shadows, and a controlled cloud/slate/ember palette.
+Each core product has a clean packshot and an in-context lifestyle image. Featured products also carry a distinct detail/use image. The catalog uses one photography language: neutral studio base, directional light, tactile materials, honest shadows, and a controlled cloud/slate/ember palette. Four-image galleries are a future content expansion, not a reason to ship repetitive variants.
 
 ### Motion
 
@@ -152,7 +152,6 @@ Each product has at least four usable images: clean packshot, alternate angle/de
 - Server-rendered product data with cached public reads.
 - Product records include slug, name, description, category, collection, price in integer cents, stock, materials, care, dimensions, featured state, and active state.
 - Product images include role, URL, alt text, sort order, width, height, and focal point.
-- Kits are catalog records with a list of component products and an optional kit price.
 - Search matches name, description, materials, and collection.
 - Inventory never becomes negative.
 
@@ -203,16 +202,23 @@ The web app owns the API so browser and Android clients share business rules.
 ```text
 GET    /api/v1/products?query=&collection=&sort=&page=
 GET    /api/v1/products/:slug
-POST   /api/v1/cart/validate
-POST   /api/v1/checkout/session
-POST   /api/v1/checkout/webhook
+POST   /api/checkout/session
+POST   /api/checkout/webhook
 GET    /api/v1/orders
-GET    /api/v1/orders/:id
-POST   /api/v1/assistant
+POST   /api/assistant
 POST   /api/auth/signup
 POST   /api/auth/login
 POST   /api/auth/logout
+POST   /api/auth/forgot-password
+POST   /api/auth/reset-password
 GET    /api/health
+```
+
+Protected operations endpoints:
+
+```text
+PATCH  /api/admin/products/:slug
+PATCH  /api/admin/orders/:id
 ```
 
 Every write endpoint validates JSON with Zod, returns a stable error shape, and logs a request ID without logging passwords, tokens, or payment data.
@@ -223,12 +229,9 @@ Core tables:
 
 - `products`
 - `product_images`
-- `collections`
-- `product_collections`
-- `kits`
-- `kit_items`
 - `users`
 - `sessions`
+- `password_reset_tokens`
 - `orders`
 - `order_items`
 - `payment_events`
@@ -241,7 +244,7 @@ Money is integer cents. IDs are opaque strings. Foreign keys, unique constraints
 
 - Web/API: Next.js App Router deployed to Vercel or equivalent.
 - Database: dedicated hosted Postgres project, never local SQLite in production.
-- Product assets: optimized object storage/CDN URLs; local fallback assets are committed for preview only.
+- Product assets: optimized committed assets for the current eight-SKU catalog; the image URL contract is ready for object storage/CDN migration when catalog operations need uploads.
 - Android: Expo/React Native with a live development server and EAS-ready build configuration.
 - Environments: local, preview, production variables kept separate.
 - CI: install, lint, typecheck, build, dependency audit, API/security checks, browser smoke.
@@ -271,8 +274,8 @@ Money is integer cents. IDs are opaque strings. Foreign keys, unique constraints
 
 ### Gate B — Professional storefront
 
-- Home, shop, product detail, cart, auth, checkout, account, support pages work.
-- Product imagery is consistent, real-looking, and sufficiently varied.
+- Home, shop, product detail, cart, auth/recovery, checkout, account, support, and admin pages work.
+- Product imagery is consistent, real-looking, and sufficiently varied for the current catalog.
 - Design works across mobile and desktop with intentional loading/empty/error states.
 
 ### Gate C — Production backend

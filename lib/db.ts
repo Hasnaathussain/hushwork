@@ -28,6 +28,7 @@ export type Product = {
   care: string;
   stock: number;
   featured: boolean;
+  active: boolean;
   kind: "product" | "kit";
   images: ProductImage[];
 };
@@ -36,7 +37,10 @@ export type User = {
   id: string;
   name: string;
   email: string;
+  role: "customer" | "admin";
 };
+
+export type OrderStatus = "pending_payment" | "paid" | "processing" | "shipped" | "delivered" | "cancelled" | "refunded";
 
 export type OrderSummary = {
   id: string;
@@ -64,6 +68,7 @@ type ProductRow = {
   care: string;
   stock: number;
   featured: boolean;
+  active: boolean;
   kind: "product" | "kit";
   images: unknown;
 };
@@ -73,6 +78,7 @@ type UserRow = {
   name: string;
   email: string;
   password_hash: string;
+  role: "customer" | "admin";
 };
 
 type Database = ReturnType<typeof postgres>;
@@ -132,16 +138,17 @@ function toProduct(row: ProductRow): Product {
     care: row.care,
     stock: Number(row.stock),
     featured: Boolean(row.featured),
+    active: Boolean(row.active),
     kind: row.kind,
     images: parseImages(row.images)
   };
 }
 
-const catalogQuery = (db: Database) => db`
+const catalogQuery = (db: Database, includeInactive = false) => db`
   SELECT
     p.id, p.slug, p.name, p.category, p.collection, p.description,
     p.price_cents, p.visual, p.material, p.ritual, p.best_used_when,
-    p.details, p.dimensions, p.care, p.stock, p.featured, p.kind,
+    p.details, p.dimensions, p.care, p.stock, p.featured, p.active, p.kind,
     COALESCE(
       json_agg(
         json_build_object('url', pi.url, 'alt', pi.alt, 'role', pi.role, 'width', pi.width, 'height', pi.height)
@@ -151,7 +158,7 @@ const catalogQuery = (db: Database) => db`
     ) AS images
   FROM products p
   LEFT JOIN product_images pi ON pi.product_id = p.id
-  WHERE p.active = true
+  WHERE (${includeInactive} = true OR p.active = true)
   GROUP BY p.id
   ORDER BY p.featured DESC, p.created_at ASC
 `;
@@ -168,6 +175,10 @@ export async function getProducts(filters?: { category?: string; collection?: st
   });
 }
 
+export async function getAdminProducts(): Promise<Product[]> {
+  return (await catalogQuery(getDb(), true) as unknown as ProductRow[]).map(toProduct);
+}
+
 export async function getProductBySlug(slug: string): Promise<Product | null> {
   const products = await getProducts();
   return products.find((product) => product.slug === slug) ?? null;
@@ -175,24 +186,24 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
 
 export async function findUserByEmail(email: string): Promise<(User & { passwordHash: string }) | null> {
   const rows = await getDb()`
-    SELECT id, name, email, password_hash
+    SELECT id, name, email, password_hash, role
     FROM users
     WHERE email = ${email.toLowerCase()}
     LIMIT 1
   ` as UserRow[];
   const row = rows[0];
-  return row ? { id: row.id, name: row.name, email: row.email, passwordHash: row.password_hash } : null;
+  return row ? { id: row.id, name: row.name, email: row.email, role: row.role, passwordHash: row.password_hash } : null;
 }
 
 export async function findUserById(id: string): Promise<User | null> {
   const rows = await getDb()`
-    SELECT id, name, email, password_hash
+    SELECT id, name, email, password_hash, role
     FROM users
     WHERE id = ${id}
     LIMIT 1
   ` as UserRow[];
   const row = rows[0];
-  return row ? { id: row.id, name: row.name, email: row.email } : null;
+  return row ? { id: row.id, name: row.name, email: row.email, role: row.role } : null;
 }
 
 export async function createUser(input: { name: string; email: string; passwordHash: string }): Promise<User> {
@@ -201,7 +212,7 @@ export async function createUser(input: { name: string; email: string; passwordH
     INSERT INTO users (id, name, email, password_hash)
     VALUES (${user.id}, ${user.name}, ${user.email}, ${user.passwordHash})
   `;
-  return { id: user.id, name: user.name, email: user.email };
+  return { id: user.id, name: user.name, email: user.email, role: "customer" };
 }
 
 export async function storeSession(input: { token: string; userId: string; expiresAt: number }): Promise<void> {
@@ -214,14 +225,14 @@ export async function storeSession(input: { token: string; userId: string; expir
 
 export async function findUserBySessionToken(token: string): Promise<User | null> {
   const rows = await getDb()`
-    SELECT u.id, u.name, u.email, u.password_hash
+    SELECT u.id, u.name, u.email, u.password_hash, u.role
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ${sessionDigest(token)} AND s.expires_at > ${Date.now()}
     LIMIT 1
   ` as UserRow[];
   const row = rows[0];
-  return row ? { id: row.id, name: row.name, email: row.email } : null;
+  return row ? { id: row.id, name: row.name, email: row.email, role: row.role } : null;
 }
 
 export async function revokeSession(token: string): Promise<void> {
@@ -229,7 +240,7 @@ export async function revokeSession(token: string): Promise<void> {
 }
 
 export class OrderError extends Error {
-  constructor(public code: "PRODUCT_NOT_FOUND" | "OUT_OF_STOCK") {
+  constructor(public code: "PRODUCT_NOT_FOUND" | "OUT_OF_STOCK" | "PAYMENT_EVENT_ALREADY_PROCESSED") {
     super(code);
   }
 }
@@ -244,6 +255,7 @@ export async function createOrder(input: {
   country: string;
   idempotencyKey: string;
   items: Array<{ slug: string; quantity: number }>;
+  paymentEvent?: { id: string; type: string; provider: string; reference?: string };
 }): Promise<{ id: string; totalCents: number; shippingCents: number }> {
   return getDb().begin(async (transaction) => {
     const previous = await transaction`
@@ -259,7 +271,7 @@ export async function createOrder(input: {
 
     for (const item of input.items) {
       const rows = await transaction`
-        SELECT id, slug, name, category, collection, description, price_cents, visual, material, ritual, best_used_when, details, dimensions, care, stock, featured, kind, '[]'::json AS images
+        SELECT id, slug, name, category, collection, description, price_cents, visual, material, ritual, best_used_when, details, dimensions, care, stock, featured, active, kind, '[]'::json AS images
         FROM products
         WHERE slug = ${item.slug} AND active = true
         FOR UPDATE
@@ -291,6 +303,20 @@ export async function createOrder(input: {
       `;
     }
 
+    if (input.paymentEvent) {
+      const paymentEvents = await transaction`
+        INSERT INTO payment_events (id, provider, provider_event_id, type)
+        VALUES (${input.paymentEvent.id}, ${input.paymentEvent.provider}, ${input.paymentEvent.id}, ${input.paymentEvent.type})
+        ON CONFLICT (provider_event_id) DO NOTHING
+        RETURNING id
+      `;
+      if (!paymentEvents.length) throw new OrderError("PAYMENT_EVENT_ALREADY_PROCESSED");
+      await transaction`
+        UPDATE orders SET payment_provider = ${input.paymentEvent.provider}, payment_reference = ${input.paymentEvent.reference ?? null}, updated_at = NOW()
+        WHERE id = ${orderId}
+      `;
+    }
+
     return { id: orderId, totalCents, shippingCents };
   });
 }
@@ -312,4 +338,113 @@ export async function getOrdersForUser(userId: string): Promise<OrderSummary[]> 
     createdAt: row.created_at,
     itemCount: Number(row.item_count)
   }));
+}
+
+export type AdminOrder = {
+  id: string;
+  email: string;
+  status: OrderStatus;
+  totalCents: number;
+  subtotalCents: number;
+  shippingCents: number;
+  createdAt: string;
+  shippingName: string;
+  shippingAddress: string;
+  city: string;
+  postalCode: string;
+  country: string;
+  items: Array<{ name: string; quantity: number; unitPriceCents: number }>;
+};
+
+export async function getAdminOrders(): Promise<AdminOrder[]> {
+  const rows = await getDb()`
+    SELECT o.id, o.email, o.status, o.total_cents, o.subtotal_cents, o.shipping_cents, o.created_at,
+      o.shipping_name, o.shipping_address, o.city, o.postal_code, o.country,
+      COALESCE(json_agg(json_build_object('name', oi.product_name, 'quantity', oi.quantity, 'unitPriceCents', oi.unit_price_cents) ORDER BY oi.id) FILTER (WHERE oi.id IS NOT NULL), '[]'::json) AS items
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    GROUP BY o.id
+    ORDER BY o.created_at DESC
+    LIMIT 100
+  ` as Array<{ id: string; email: string; status: OrderStatus; total_cents: number; subtotal_cents: number; shipping_cents: number; created_at: string; shipping_name: string; shipping_address: string; city: string; postal_code: string; country: string; items: unknown }>;
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    status: row.status,
+    totalCents: Number(row.total_cents),
+    subtotalCents: Number(row.subtotal_cents),
+    shippingCents: Number(row.shipping_cents),
+    createdAt: row.created_at,
+    shippingName: row.shipping_name,
+    shippingAddress: row.shipping_address,
+    city: row.city,
+    postalCode: row.postal_code,
+    country: row.country,
+    items: Array.isArray(row.items) ? row.items as AdminOrder["items"] : []
+  }));
+}
+
+export async function updateAdminProduct(input: { slug: string; stock: number; active: boolean; actorUserId: string }): Promise<Product | null> {
+  await getDb().begin(async (transaction) => {
+    const rows = await transaction`
+      UPDATE products SET stock = ${input.stock}, active = ${input.active}, updated_at = NOW()
+      WHERE slug = ${input.slug}
+      RETURNING id
+    `;
+    if (!rows.length) return;
+    await transaction`
+      INSERT INTO admin_audit_events (id, actor_user_id, action, entity_type, entity_id, metadata)
+      VALUES (${randomUUID()}, ${input.actorUserId}, 'update', 'product', ${input.slug}, ${JSON.stringify({ stock: input.stock, active: input.active })}::jsonb)
+    `;
+  });
+  return (await getAdminProducts()).find((product) => product.slug === input.slug) ?? null;
+}
+
+export async function updateAdminOrderStatus(input: { id: string; status: OrderStatus; actorUserId: string }): Promise<boolean> {
+  return getDb().begin(async (transaction) => {
+    const rows = await transaction`
+      UPDATE orders SET status = ${input.status}, updated_at = NOW()
+      WHERE id = ${input.id}
+      RETURNING id
+    `;
+    if (!rows.length) return false;
+    await transaction`
+      INSERT INTO admin_audit_events (id, actor_user_id, action, entity_type, entity_id, metadata)
+      VALUES (${randomUUID()}, ${input.actorUserId}, 'update_status', 'order', ${input.id}, ${JSON.stringify({ status: input.status })}::jsonb)
+    `;
+    return true;
+  });
+}
+
+function resetTokenDigest(token: string): string {
+  return sessionDigest(token);
+}
+
+export async function createPasswordResetToken(email: string): Promise<{ email: string; token: string } | null> {
+  const user = await findUserByEmail(email);
+  if (!user) return null;
+  const token = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
+  await getDb().begin(async (transaction) => {
+    await transaction`DELETE FROM password_reset_tokens WHERE user_id = ${user.id} OR expires_at <= NOW()`;
+    await transaction`
+      INSERT INTO password_reset_tokens (token_hash, user_id, expires_at)
+      VALUES (${resetTokenDigest(token)}, ${user.id}, NOW() + INTERVAL '30 minutes')
+    `;
+  });
+  return { email: user.email, token };
+}
+
+export async function consumePasswordResetToken(token: string, passwordHash: string): Promise<boolean> {
+  return getDb().begin(async (transaction) => {
+    const rows = await transaction`
+      SELECT user_id FROM password_reset_tokens
+      WHERE token_hash = ${resetTokenDigest(token)} AND used_at IS NULL AND expires_at > NOW()
+      FOR UPDATE
+    ` as Array<{ user_id: string }>;
+    if (!rows[0]) return false;
+    await transaction`UPDATE users SET password_hash = ${passwordHash} WHERE id = ${rows[0].user_id}`;
+    await transaction`UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = ${resetTokenDigest(token)}`;
+    await transaction`DELETE FROM sessions WHERE user_id = ${rows[0].user_id}`;
+    return true;
+  });
 }
