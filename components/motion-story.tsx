@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
@@ -8,7 +9,7 @@ import { ProductArt } from "@/components/product-art";
 gsap.registerPlugin(ScrollTrigger);
 
 export function MotionStory() {
-  const root = { current: null as HTMLDivElement | null };
+  const root = useRef<HTMLDivElement>(null);
   useGSAP(() => {
     if (!root.current) return;
     const words = root.current.querySelectorAll<HTMLElement>("[data-reveal-word]");
