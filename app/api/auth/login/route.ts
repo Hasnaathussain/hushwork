@@ -14,7 +14,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
     const body = loginSchema.parse(await request.json());
-    const user = findUserByEmail(body.email);
+    const user = await findUserByEmail(body.email);
     if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
       return NextResponse.json({ error: "Email or password is not right." }, { status: 401 });
     }

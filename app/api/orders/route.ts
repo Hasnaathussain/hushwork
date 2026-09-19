@@ -1,24 +1,15 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { createOrder, OrderError } from "@/lib/db";
-import { assertSameOrigin } from "@/lib/security";
-import { orderSchema } from "@/lib/validation";
+import { getOrdersForUser } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-export async function POST(request: Request) {
-  try {
-    assertSameOrigin(request);
-    const body = orderSchema.parse(await request.json());
-    const user = await getCurrentUser();
-    const order = createOrder({ ...body, userId: user?.id });
-    return NextResponse.json({ order }, { status: 201 });
-  } catch (error) {
-    if (error instanceof OrderError) {
-      const status = error.code === "OUT_OF_STOCK" ? 409 : 404;
-      return NextResponse.json({ error: error.code === "OUT_OF_STOCK" ? "One of those objects just sold out." : "One of those objects is no longer on the shelf." }, { status });
-    }
-    if (error instanceof SyntaxError) return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
-    return NextResponse.json({ error: "We could not place that order. Check the details and try again." }, { status: 400 });
-  }
+export async function GET() {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Sign in to view orders." }, { status: 401 });
+  return NextResponse.json({ orders: await getOrdersForUser(user.id) });
+}
+
+export async function POST() {
+  return NextResponse.json({ error: "Orders are created only after verified payment." }, { status: 405 });
 }

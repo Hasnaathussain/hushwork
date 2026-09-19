@@ -16,6 +16,7 @@ const contentSecurityPolicy = [
 const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  allowedDevOrigins: ["localhost", "127.0.0.1"],
   async headers() {
     return [
       {
@@ -25,10 +26,17 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
           { key: "Content-Security-Policy", value: contentSecurityPolicy }
         ]
+      },
+      {
+        source: "/images/:path*",
+        headers: [{ key: "Cross-Origin-Resource-Policy", value: "cross-origin" }]
+      },
+      {
+        source: "/_next/image",
+        headers: [{ key: "Cross-Origin-Resource-Policy", value: "cross-origin" }]
       }
     ];
   }

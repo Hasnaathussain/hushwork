@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "HUSHWORK",
+    "slug": "hushwork",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/hushwork-icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "store.hushwork.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#141515",
+        "foregroundImage": "./assets/hushwork-foreground.png",
+        "backgroundImage": "./assets/hushwork-background.png",
+        "monochromeImage": "./assets/hushwork-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "scheme": "hushwork"
+  }
+}

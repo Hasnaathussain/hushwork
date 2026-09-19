@@ -2,11 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Minus, Plus, ShoppingBag, X } from "lucide-react";
 import type { Product } from "@/lib/db";
 import { formatPrice } from "@/lib/format";
 
-export type CartItem = Pick<Product, "id" | "slug" | "name" | "priceCents" | "visual" | "stock"> & { quantity: number };
+export type CartItem = Pick<Product, "id" | "slug" | "name" | "priceCents" | "visual" | "stock"> & { imageUrl?: string; quantity: number };
 
 type CartContextValue = {
   items: CartItem[];
@@ -63,7 +64,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setItems((current) => {
       const existing = current.find((item) => item.slug === product.slug);
       if (existing) return current.map((item) => item.slug === product.slug ? { ...item, quantity: Math.min(item.quantity + quantity, item.stock) } : item);
-      return [...current, { id: product.id, slug: product.slug, name: product.name, priceCents: product.priceCents, visual: product.visual, stock: product.stock, quantity: Math.min(quantity, product.stock) }];
+      return [...current, { id: product.id, slug: product.slug, name: product.name, priceCents: product.priceCents, visual: product.visual, stock: product.stock, imageUrl: product.images[0]?.url, quantity: Math.min(quantity, product.stock) }];
     });
   }, []);
 
@@ -97,10 +98,10 @@ function CartDrawer() {
         </div>
         {items.length ? (
           <div className="cart-drawer__content">
-            <div className="cart-items">
+          <div className="cart-items">
               {items.map((item) => (
                 <div className="cart-item" key={item.slug}>
-                  <div className={`cart-item__swatch visual-${item.visual}`} aria-hidden="true"><span /></div>
+                  <div className="cart-item__swatch" aria-hidden="true">{item.imageUrl ? <Image src={item.imageUrl} alt="" fill sizes="64px" /> : <span>{item.name.slice(0, 1)}</span>}</div>
                   <div className="cart-item__info"><Link href={`/product/${item.slug}`} onClick={closeCart}>{item.name}</Link><span>{formatPrice(item.priceCents)}</span><div className="quantity-control"><button type="button" onClick={() => item.quantity === 1 ? removeItem(item.slug) : updateQuantity(item.slug, item.quantity - 1)} aria-label={`Decrease ${item.name} quantity`}><Minus size={13} /></button><span>{item.quantity}</span><button type="button" onClick={() => updateQuantity(item.slug, item.quantity + 1)} aria-label={`Increase ${item.name} quantity`} disabled={item.quantity >= item.stock}><Plus size={13} /></button></div></div>
                   <button className="cart-item__remove" type="button" onClick={() => removeItem(item.slug)}>Remove</button>
                 </div>

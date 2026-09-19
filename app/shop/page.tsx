@@ -7,6 +7,6 @@ export const metadata: Metadata = {
   description: "Browse the current HUSHWORK collection."
 };
 
-export default function ShopPage() {
-  return <ShopClient products={getProducts()} />;
+export default async function ShopPage() {
+  return <ShopClient products={await getProducts()} />;
 }

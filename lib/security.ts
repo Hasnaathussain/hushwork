@@ -16,7 +16,7 @@ export function assertSameOrigin(request: Request): void {
   }
 }
 
-// ponytail: an in-memory limiter is enough for a single-instance portfolio demo; use a shared limiter before multi-instance production.
+// ponytail: an in-memory limiter is enough for one hosted instance; move this to a shared limiter before horizontal scaling.
 export function checkRateLimit(key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
   const current = requestBuckets.get(key);

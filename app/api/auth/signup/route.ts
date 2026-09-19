@@ -14,8 +14,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
     const body = signupSchema.parse(await request.json());
-    if (findUserByEmail(body.email)) return NextResponse.json({ error: "Could not create that account." }, { status: 409 });
-    const user = createUser({ name: body.name, email: body.email, passwordHash: await bcrypt.hash(body.password, 12) });
+    if (await findUserByEmail(body.email)) return NextResponse.json({ error: "Could not create that account." }, { status: 409 });
+    const user = await createUser({ name: body.name, email: body.email, passwordHash: await bcrypt.hash(body.password, 12) });
     await startSession(user.id);
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {

@@ -131,7 +131,7 @@ async function modelAnswer(message: string, products: Product[]): Promise<string
 }
 
 export async function answerAssistant(message: string) {
-  const products = getProducts();
+  const products = await getProducts();
   const modelReply = await modelAnswer(message, products);
   if (modelReply) {
     return { mode: "model", reply: modelReply, recommendations: localRecommendations(message, products) };

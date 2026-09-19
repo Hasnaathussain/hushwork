@@ -1,17 +1,22 @@
 import "server-only";
 
-import DatabaseConstructor from "better-sqlite3";
 import { createHmac, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
+import postgres from "postgres";
 
-type SqliteDatabase = ReturnType<typeof DatabaseConstructor>;
+export type ProductImage = {
+  url: string;
+  alt: string;
+  role: "packshot" | "detail" | "lifestyle" | "scale";
+  width: number;
+  height: number;
+};
 
 export type Product = {
   id: string;
   slug: string;
   name: string;
   category: string;
+  collection: string;
   description: string;
   priceCents: number;
   visual: string;
@@ -19,8 +24,12 @@ export type Product = {
   ritual: string;
   bestUsedWhen: string;
   details: string;
+  dimensions: string;
+  care: string;
   stock: number;
   featured: boolean;
+  kind: "product" | "kit";
+  images: ProductImage[];
 };
 
 export type User = {
@@ -43,6 +52,7 @@ type ProductRow = {
   slug: string;
   name: string;
   category: string;
+  collection: string;
   description: string;
   price_cents: number;
   visual: string;
@@ -50,10 +60,42 @@ type ProductRow = {
   ritual: string;
   best_used_when: string;
   details: string;
+  dimensions: string;
+  care: string;
   stock: number;
-  featured: number;
+  featured: boolean;
+  kind: "product" | "kit";
+  images: unknown;
 };
-type UserRow = User & { password_hash: string; created_at: string };
+
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  password_hash: string;
+};
+
+type Database = ReturnType<typeof postgres>;
+
+let database: Database | null = null;
+
+function databaseUrl(): string {
+  const value = process.env.DATABASE_URL;
+  if (!value) throw new Error("DATABASE_URL is not configured.");
+  return value;
+}
+
+export function getDb(): Database {
+  if (!database) {
+    database = postgres(databaseUrl(), {
+      max: process.env.NODE_ENV === "production" ? 5 : 1,
+      prepare: false,
+      idle_timeout: 20,
+      connect_timeout: 10
+    });
+  }
+  return database;
+}
 
 function sessionDigest(token: string): string {
   const configuredSecret = process.env.AUTH_SECRET;
@@ -63,130 +105,14 @@ function sessionDigest(token: string): string {
   return createHmac("sha256", configuredSecret || "hushwork-development-only-secret").update(token).digest("hex");
 }
 
-const seedProducts = [
-  {
-    id: "prod_last_match",
-    slug: "the-last-match-candle",
-    name: "The Last Match Candle",
-    category: "light",
-    description: "Beeswax, cedar, and the small ceremony of striking one more match.",
-    priceCents: 3400,
-    visual: "candle",
-    material: "Beeswax + cedar",
-    ritual: "host",
-    bestUsedWhen: "Dinner is nearly ready and nobody needs to rush.",
-    details: "A clean-burning beeswax candle poured in a smoked glass tumbler. The cedar note stays close to the table and softens as the flame settles.",
-    stock: 24,
-    featured: 1
-  },
-  {
-    id: "prod_night_ledger",
-    slug: "night-ledger",
-    name: "Night Ledger",
-    category: "write",
-    description: "An unruled place for lists, fragments, and the thought that almost got away.",
-    priceCents: 1800,
-    visual: "ledger",
-    material: "FSC paper + cloth spine",
-    ritual: "read",
-    bestUsedWhen: "The room is quiet enough to hear the pencil move.",
-    details: "Sixty-four unruled pages, rounded corners, and a cloth-wrapped spine that gets softer with use.",
-    stock: 31,
-    featured: 1
-  },
-  {
-    id: "prod_ashwood_incense",
-    slug: "ashwood-incense-no-02",
-    name: "Ashwood Incense No. 02",
-    category: "scent",
-    description: "Dry pine, black tea, and a trace of smoke for an open window.",
-    priceCents: 2200,
-    visual: "incense",
-    material: "Pine + black tea",
-    ritual: "unwind",
-    bestUsedWhen: "The day is still in the walls but no longer in the room.",
-    details: "Twenty hand-rolled sticks with a mineral ceramic rest. Light for a minute, then let the room finish the sentence.",
-    stock: 18,
-    featured: 1
-  },
-  {
-    id: "prod_sunday_cup",
-    slug: "sunday-cup",
-    name: "Sunday Cup",
-    category: "table",
-    description: "Speckled stoneware with a thumb-sized handle and no identical twin.",
-    priceCents: 4200,
-    visual: "cup",
-    material: "Speckled stoneware",
-    ritual: "host",
-    bestUsedWhen: "Coffee has become a conversation.",
-    details: "Thrown in small batches, glazed by hand, and fired with enough variation to keep the set from feeling like a set.",
-    stock: 12,
-    featured: 1
-  },
-  {
-    id: "prod_mending_tin",
-    slug: "the-mending-tin",
-    name: "The Mending Tin",
-    category: "carry",
-    description: "Waxed thread, brass needle, linen patches, and a tiny pair of scissors.",
-    priceCents: 2900,
-    visual: "tin",
-    material: "Brass + linen + waxed thread",
-    ritual: "repair",
-    bestUsedWhen: "Something small deserves another year.",
-    details: "A pocket-sized repair kit assembled in a hinged steel tin. Useful on a desk, in a drawer, or in the bottom of a bag.",
-    stock: 27,
-    featured: 0
-  },
-  {
-    id: "prod_pocket_cloth",
-    slug: "pocket-cloth",
-    name: "Pocket Cloth",
-    category: "carry",
-    description: "A soft cotton square for glasses, cameras, bread, or whatever needs carrying gently.",
-    priceCents: 1600,
-    visual: "cloth",
-    material: "Washed cotton",
-    ritual: "wander",
-    bestUsedWhen: "You are leaving with less than you came in with.",
-    details: "A 35cm square of densely woven cotton, finished with a raw edge that improves with every wash.",
-    stock: 42,
-    featured: 0
-  },
-  {
-    id: "prod_low_lamp",
-    slug: "low-lamp",
-    name: "Low Lamp",
-    category: "light",
-    description: "A portable ceramic lamp with an amber glow and no visible switch.",
-    priceCents: 9600,
-    visual: "lamp",
-    material: "Ceramic + warm LED",
-    ritual: "read",
-    bestUsedWhen: "The overhead light has done enough for one day.",
-    details: "A rechargeable stoneware lamp that turns on with a palm resting on its cap. Six hours of low light per charge.",
-    stock: 9,
-    featured: 1
-  },
-  {
-    id: "prod_house_matches",
-    slug: "house-blend-matches",
-    name: "House Blend Matches",
-    category: "editions",
-    description: "Forty oversized matches in a screen-printed drawer box. Striker included.",
-    priceCents: 1200,
-    visual: "matches",
-    material: "Wood + vegetable ink",
-    ritual: "host",
-    bestUsedWhen: "A small spark is the whole point.",
-    details: "A limited print run in a drawer-style box with a full-width striker and extra-long stems for candles and incense.",
-    stock: 55,
-    featured: 0
-  }
-] as const;
-
-let database: SqliteDatabase | null = null;
+function parseImages(value: unknown): ProductImage[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((image): image is ProductImage => {
+    if (!image || typeof image !== "object") return false;
+    const candidate = image as Partial<ProductImage>;
+    return typeof candidate.url === "string" && typeof candidate.alt === "string" && typeof candidate.role === "string" && typeof candidate.width === "number" && typeof candidate.height === "number";
+  });
+}
 
 function toProduct(row: ProductRow): Product {
   return {
@@ -194,170 +120,112 @@ function toProduct(row: ProductRow): Product {
     slug: row.slug,
     name: row.name,
     category: row.category,
+    collection: row.collection,
     description: row.description,
-    priceCents: row.price_cents,
+    priceCents: Number(row.price_cents),
     visual: row.visual,
     material: row.material,
     ritual: row.ritual,
     bestUsedWhen: row.best_used_when,
     details: row.details,
-    stock: row.stock,
-    featured: Boolean(row.featured)
+    dimensions: row.dimensions,
+    care: row.care,
+    stock: Number(row.stock),
+    featured: Boolean(row.featured),
+    kind: row.kind,
+    images: parseImages(row.images)
   };
 }
 
-function toUser(row: UserRow): User {
-  return { id: row.id, name: row.name, email: row.email };
+const catalogQuery = (db: Database) => db`
+  SELECT
+    p.id, p.slug, p.name, p.category, p.collection, p.description,
+    p.price_cents, p.visual, p.material, p.ritual, p.best_used_when,
+    p.details, p.dimensions, p.care, p.stock, p.featured, p.kind,
+    COALESCE(
+      json_agg(
+        json_build_object('url', pi.url, 'alt', pi.alt, 'role', pi.role, 'width', pi.width, 'height', pi.height)
+        ORDER BY pi.sort_order
+      ) FILTER (WHERE pi.id IS NOT NULL),
+      '[]'::json
+    ) AS images
+  FROM products p
+  LEFT JOIN product_images pi ON pi.product_id = p.id
+  WHERE p.active = true
+  GROUP BY p.id
+  ORDER BY p.featured DESC, p.created_at ASC
+`;
+
+export async function getProducts(filters?: { category?: string; collection?: string; ritual?: string; query?: string }): Promise<Product[]> {
+  const products = (await catalogQuery(getDb()) as unknown as ProductRow[]).map(toProduct);
+  const query = filters?.query?.trim().toLowerCase();
+  return products.filter((product) => {
+    if (filters?.category && filters.category !== "all" && product.category !== filters.category) return false;
+    if (filters?.collection && filters.collection !== "all" && product.collection !== filters.collection) return false;
+    if (filters?.ritual && filters.ritual !== "all" && product.ritual !== filters.ritual) return false;
+    if (query && !`${product.name} ${product.description} ${product.material} ${product.collection} ${product.category}`.toLowerCase().includes(query)) return false;
+    return true;
+  });
 }
 
-export function getDb(): SqliteDatabase {
-  if (database) return database;
-
-  const dataDirectory = path.join(process.cwd(), ".data");
-  mkdirSync(dataDirectory, { recursive: true });
-  database = new DatabaseConstructor(path.join(dataDirectory, "hushwork.db"));
-  database.pragma("journal_mode = WAL");
-  database.pragma("foreign_keys = ON");
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS products (
-      id TEXT PRIMARY KEY,
-      slug TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      description TEXT NOT NULL,
-      price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
-      visual TEXT NOT NULL,
-      material TEXT NOT NULL,
-      ritual TEXT NOT NULL,
-      best_used_when TEXT NOT NULL,
-      details TEXT NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
-      featured INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      expires_at INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS orders (
-      id TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      idempotency_key TEXT,
-      email TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('placed', 'cancelled')),
-      subtotal_cents INTEGER NOT NULL,
-      shipping_cents INTEGER NOT NULL,
-      total_cents INTEGER NOT NULL,
-      shipping_name TEXT NOT NULL,
-      shipping_address TEXT NOT NULL,
-      city TEXT NOT NULL,
-      postal_code TEXT NOT NULL,
-      country TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS order_items (
-      id TEXT PRIMARY KEY,
-      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      product_id TEXT NOT NULL REFERENCES products(id),
-      product_name TEXT NOT NULL,
-      unit_price_cents INTEGER NOT NULL,
-      quantity INTEGER NOT NULL CHECK (quantity > 0)
-    );
-    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-    CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
-  `);
-
-  const orderColumns = database.prepare("PRAGMA table_info(orders)").all() as Array<{ name: string }>;
-  if (!orderColumns.some((column) => column.name === "idempotency_key")) database.exec("ALTER TABLE orders ADD COLUMN idempotency_key TEXT");
-  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency_key ON orders(idempotency_key) WHERE idempotency_key IS NOT NULL");
-
-  const productCount = database.prepare("SELECT COUNT(*) AS count FROM products").get() as { count: number };
-  if (productCount.count === 0) {
-    const insert = database.prepare(`
-      INSERT INTO products (id, slug, name, category, description, price_cents, visual, material, ritual, best_used_when, details, stock, featured)
-      VALUES (@id, @slug, @name, @category, @description, @priceCents, @visual, @material, @ritual, @bestUsedWhen, @details, @stock, @featured)
-    `);
-    const seed = database.transaction(() => {
-      for (const product of seedProducts) insert.run(product);
-    });
-    seed();
-  }
-
-  return database;
+export async function getProductBySlug(slug: string): Promise<Product | null> {
+  const products = await getProducts();
+  return products.find((product) => product.slug === slug) ?? null;
 }
 
-export function getProducts(filters?: { category?: string; ritual?: string; query?: string }): Product[] {
-  const db = getDb();
-  const conditions: string[] = [];
-  const values: Record<string, string> = {};
-
-  if (filters?.category && filters.category !== "all") {
-    conditions.push("category = @category");
-    values.category = filters.category;
-  }
-  if (filters?.ritual && filters.ritual !== "all") {
-    conditions.push("ritual = @ritual");
-    values.ritual = filters.ritual;
-  }
-  if (filters?.query) {
-    conditions.push("(name LIKE @query OR description LIKE @query OR material LIKE @query)");
-    values.query = `%${filters.query}%`;
-  }
-
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = db.prepare(`SELECT * FROM products ${where} ORDER BY featured DESC, created_at ASC`).all(values) as ProductRow[];
-  return rows.map(toProduct);
+export async function findUserByEmail(email: string): Promise<(User & { passwordHash: string }) | null> {
+  const rows = await getDb()`
+    SELECT id, name, email, password_hash
+    FROM users
+    WHERE email = ${email.toLowerCase()}
+    LIMIT 1
+  ` as UserRow[];
+  const row = rows[0];
+  return row ? { id: row.id, name: row.name, email: row.email, passwordHash: row.password_hash } : null;
 }
 
-export function getProductBySlug(slug: string): Product | null {
-  const row = getDb().prepare("SELECT * FROM products WHERE slug = ?").get(slug) as ProductRow | undefined;
-  return row ? toProduct(row) : null;
+export async function findUserById(id: string): Promise<User | null> {
+  const rows = await getDb()`
+    SELECT id, name, email, password_hash
+    FROM users
+    WHERE id = ${id}
+    LIMIT 1
+  ` as UserRow[];
+  const row = rows[0];
+  return row ? { id: row.id, name: row.name, email: row.email } : null;
 }
 
-export function findUserByEmail(email: string): (User & { passwordHash: string }) | null {
-  const row = getDb().prepare("SELECT id, name, email, password_hash, created_at FROM users WHERE email = ?").get(email) as UserRow | undefined;
-  return row ? { ...toUser(row), passwordHash: row.password_hash } : null;
-}
-
-export function findUserById(id: string): User | null {
-  const row = getDb().prepare("SELECT id, name, email, password_hash, created_at FROM users WHERE id = ?").get(id) as UserRow | undefined;
-  return row ? toUser(row) : null;
-}
-
-export function createUser(input: { name: string; email: string; passwordHash: string }): User {
-  const user = { id: randomUUID(), ...input };
-  getDb().prepare("INSERT INTO users (id, name, email, password_hash) VALUES (@id, @name, @email, @passwordHash)").run(user);
+export async function createUser(input: { name: string; email: string; passwordHash: string }): Promise<User> {
+  const user = { id: randomUUID(), name: input.name, email: input.email.toLowerCase(), passwordHash: input.passwordHash };
+  await getDb()`
+    INSERT INTO users (id, name, email, password_hash)
+    VALUES (${user.id}, ${user.name}, ${user.email}, ${user.passwordHash})
+  `;
   return { id: user.id, name: user.name, email: user.email };
 }
 
-export function storeSession(input: { token: string; userId: string; expiresAt: number }): void {
-  const tokenHash = sessionDigest(input.token);
-  getDb().prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(tokenHash, input.userId, input.expiresAt);
+export async function storeSession(input: { token: string; userId: string; expiresAt: number }): Promise<void> {
+  await getDb()`
+    INSERT INTO sessions (token_hash, user_id, expires_at)
+    VALUES (${sessionDigest(input.token)}, ${input.userId}, ${input.expiresAt})
+    ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at
+  `;
 }
 
-export function findUserBySessionToken(token: string): User | null {
-  const tokenHash = sessionDigest(token);
-  const row = getDb().prepare(`
-    SELECT u.id, u.name, u.email, u.password_hash, u.created_at
+export async function findUserBySessionToken(token: string): Promise<User | null> {
+  const rows = await getDb()`
+    SELECT u.id, u.name, u.email, u.password_hash
     FROM sessions s
     JOIN users u ON u.id = s.user_id
-    WHERE s.token_hash = ? AND s.expires_at > ?
-  `).get(tokenHash, Date.now()) as UserRow | undefined;
-  return row ? toUser(row) : null;
+    WHERE s.token_hash = ${sessionDigest(token)} AND s.expires_at > ${Date.now()}
+    LIMIT 1
+  ` as UserRow[];
+  const row = rows[0];
+  return row ? { id: row.id, name: row.name, email: row.email } : null;
 }
 
-export function revokeSession(token: string): void {
-  const tokenHash = sessionDigest(token);
-  getDb().prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
+export async function revokeSession(token: string): Promise<void> {
+  await getDb()`DELETE FROM sessions WHERE token_hash = ${sessionDigest(token)}`;
 }
 
 export class OrderError extends Error {
@@ -366,7 +234,7 @@ export class OrderError extends Error {
   }
 }
 
-export function createOrder(input: {
+export async function createOrder(input: {
   userId?: string;
   email: string;
   shippingName: string;
@@ -376,81 +244,72 @@ export function createOrder(input: {
   country: string;
   idempotencyKey: string;
   items: Array<{ slug: string; quantity: number }>;
-}): { id: string; totalCents: number; shippingCents: number } {
-  const db = getDb();
-  const create = db.transaction(() => {
-    const previousOrder = db.prepare("SELECT id, total_cents, shipping_cents FROM orders WHERE idempotency_key = ? AND email = ?").get(input.idempotencyKey, input.email) as { id: string; total_cents: number; shipping_cents: number } | undefined;
-    if (previousOrder) return { id: previousOrder.id, totalCents: previousOrder.total_cents, shippingCents: previousOrder.shipping_cents };
+}): Promise<{ id: string; totalCents: number; shippingCents: number }> {
+  return getDb().begin(async (transaction) => {
+    const previous = await transaction`
+      SELECT id, total_cents, shipping_cents
+      FROM orders
+      WHERE idempotency_key = ${input.idempotencyKey} AND email = ${input.email}
+      LIMIT 1
+    ` as Array<{ id: string; total_cents: number; shipping_cents: number }>;
+    if (previous[0]) return { id: previous[0].id, totalCents: Number(previous[0].total_cents), shippingCents: Number(previous[0].shipping_cents) };
 
     const resolvedItems: Array<{ product: Product; quantity: number }> = [];
     let subtotalCents = 0;
 
     for (const item of input.items) {
-      const product = getProductBySlug(item.slug);
-      if (!product) throw new OrderError("PRODUCT_NOT_FOUND");
+      const rows = await transaction`
+        SELECT id, slug, name, category, collection, description, price_cents, visual, material, ritual, best_used_when, details, dimensions, care, stock, featured, kind, '[]'::json AS images
+        FROM products
+        WHERE slug = ${item.slug} AND active = true
+        FOR UPDATE
+      ` as ProductRow[];
+      const row = rows[0];
+      if (!row) throw new OrderError("PRODUCT_NOT_FOUND");
+      const product = toProduct(row);
       if (product.stock < item.quantity) throw new OrderError("OUT_OF_STOCK");
       resolvedItems.push({ product, quantity: item.quantity });
       subtotalCents += product.priceCents * item.quantity;
     }
 
     const shippingCents = subtotalCents >= 7500 ? 0 : 850;
+    const totalCents = subtotalCents + shippingCents;
     const orderId = `order_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-    db.prepare(`
+    await transaction`
       INSERT INTO orders (id, user_id, idempotency_key, email, status, subtotal_cents, shipping_cents, total_cents, shipping_name, shipping_address, city, postal_code, country)
-      VALUES (@id, @userId, @idempotencyKey, @email, 'placed', @subtotalCents, @shippingCents, @totalCents, @shippingName, @shippingAddress, @city, @postalCode, @country)
-    `).run({
-      id: orderId,
-      userId: input.userId ?? null,
-      idempotencyKey: input.idempotencyKey,
-      email: input.email,
-      subtotalCents,
-      shippingCents,
-      totalCents: subtotalCents + shippingCents,
-      shippingName: input.shippingName,
-      shippingAddress: input.shippingAddress,
-      city: input.city,
-      postalCode: input.postalCode,
-      country: input.country
-    });
+      VALUES (${orderId}, ${input.userId ?? null}, ${input.idempotencyKey}, ${input.email}, 'paid', ${subtotalCents}, ${shippingCents}, ${totalCents}, ${input.shippingName}, ${input.shippingAddress}, ${input.city}, ${input.postalCode}, ${input.country})
+    `;
 
-    const insertItem = db.prepare(`
-      INSERT INTO order_items (id, order_id, product_id, product_name, unit_price_cents, quantity)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    const decrementStock = db.prepare("UPDATE products SET stock = stock - ? WHERE id = ?");
     for (const item of resolvedItems) {
-      insertItem.run(randomUUID(), orderId, item.product.id, item.product.name, item.product.priceCents, item.quantity);
-      decrementStock.run(item.quantity, item.product.id);
+      await transaction`
+        INSERT INTO order_items (id, order_id, product_id, product_name, unit_price_cents, quantity)
+        VALUES (${randomUUID()}, ${orderId}, ${item.product.id}, ${item.product.name}, ${item.product.priceCents}, ${item.quantity})
+      `;
+      await transaction`
+        UPDATE products SET stock = stock - ${item.quantity}, updated_at = NOW()
+        WHERE id = ${item.product.id} AND stock >= ${item.quantity}
+      `;
     }
 
-    return { id: orderId, totalCents: subtotalCents + shippingCents, shippingCents };
+    return { id: orderId, totalCents, shippingCents };
   });
-
-  return create();
 }
 
-export function getOrdersForUser(userId: string): OrderSummary[] {
-  const rows = getDb().prepare(`
+export async function getOrdersForUser(userId: string): Promise<OrderSummary[]> {
+  const rows = await getDb()`
     SELECT o.id, o.email, o.status, o.total_cents, o.created_at, COALESCE(SUM(oi.quantity), 0) AS item_count
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
-    WHERE o.user_id = ?
+    WHERE o.user_id = ${userId}
     GROUP BY o.id
     ORDER BY o.created_at DESC
-  `).all(userId) as Array<{
-    id: string;
-    email: string;
-    status: string;
-    total_cents: number;
-    created_at: string;
-    item_count: number;
-  }>;
+  ` as Array<{ id: string; email: string; status: string; total_cents: number; created_at: string; item_count: number }>;
   return rows.map((row) => ({
     id: row.id,
     email: row.email,
     status: row.status,
-    totalCents: row.total_cents,
+    totalCents: Number(row.total_cents),
     createdAt: row.created_at,
-    itemCount: row.item_count
+    itemCount: Number(row.item_count)
   }));
 }

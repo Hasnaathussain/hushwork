@@ -21,14 +21,26 @@ export async function getCurrentUser(): Promise<User | null> {
 }
 
 export async function startSession(userId: string): Promise<void> {
-  const token = randomBytes(32).toString("hex");
-  storeSession({ token, userId, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 });
+  const token = await createSessionToken(userId);
   (await cookies()).set(SESSION_COOKIE, token, cookieOptions);
+}
+
+export async function createSessionToken(userId: string): Promise<string> {
+  const token = randomBytes(32).toString("hex");
+  await storeSession({ token, userId, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 });
+  return token;
+}
+
+export async function getUserFromRequest(request: Request): Promise<User | null> {
+  const value = request.headers.get("authorization");
+  if (!value?.toLowerCase().startsWith("bearer ")) return getCurrentUser();
+  const token = value.slice(7).trim();
+  return token ? findUserBySessionToken(token) : null;
 }
 
 export async function endSession(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
-  if (token) revokeSession(token);
+  if (token) await revokeSession(token);
   jar.delete(SESSION_COOKIE);
 }
