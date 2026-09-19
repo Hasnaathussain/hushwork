@@ -23,7 +23,11 @@ npm run lint
 npm run typecheck
 npm run build
 npm run audit
+npm run dev
+npm run smoke
 ```
+
+`npm run smoke` expects the dev server at `http://127.0.0.1:3000`, uses the locally installed Chrome binary when available, and checks the home, cart, checkout, assistant, auth, logout, and responsive flows. It writes ignored screenshots to `artifacts/`.
 
 ## What is included
 
